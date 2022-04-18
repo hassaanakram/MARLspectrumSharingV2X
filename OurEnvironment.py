@@ -17,20 +17,20 @@ class MBSChannel:
 		self.beta = 3
 
 	def get_path_loss(self, position_BS, position_UE):
-		# Positions should be a tuple (x,y) with each x,y being numpy arrays of Kx1 where K is the 
-		# number of either base stations or the number of user equipment
+		# Positions should be a tuple (x,y) with each x,y being numpy arrays of Kx1 or Nx1 where K is the 
+		# number of UE and N is the number of BS
 		# BS_x: Nx1, BS_y: Nx1 vectors
-		# UE_x = UE_y = 1x1 scalar
+		# UE_x = UE_y = Nx1 vectors
 		BS_x, BS_y = position_BS
 		UE_x, UE_y = position_UE
 		num_BS = BS_x.shape[0]
-		# shadowing: num_UEx1 vector
-		shadowing = s.lognorm.rvs(s=self.shadow_std, size=num_BS)
-		# m.pow(BS_x-UE_x,2) = m.pow(BS_y-UE_y, 2): Nx1 vectors
-		# distance: Nx1 vector: Distance of the user in question from each 
-		# base station
-		distance = m.sqrt(m.pow(BS_x-UE_x,2) - m.pow(BS_y-UE_y,2))
-		# path_loss: Nx1 vector (hopefully)
+		num_UE = UE_x.shape[0]
+		# shadowing: num_BSxnum_UE (NxK) matrix
+		shadowing = s.lognorm.rvs(s=self.shadow_std, size=(num_BS, num_UE))
+		# m.pow(BS_x-UE_x,2) = m.pow(BS_y-UE_y,2): NxK vectors
+		# distance: NxK matrix: Distance of each BS from each user
+		distance = m.sqrt(m.pow(BS_x[:, None]-UE_x,2) - m.pow(BS_y[:, None]-UE_y,2))
+		# path_loss: NxK matrix (hopefully)
 		path_loss = 10*m.log10((4*m.pi*self.frequency)/c) + 10*self.beta*m.log10(distance)+shadowing
 
 		return path_loss
@@ -39,9 +39,9 @@ class MBSChannel:
 		# power_transmitted: Nx1
 		# gain: Nx1
 		# bias: Nx1
-		# fading: Nx1
-		# path_loss: Nx1
-		return (power_transmitted + gain - path_loss + bias + fading)
+		# fading: NxK
+		# path_loss: NxK
+		return (power_transmitted[:,None] + gain[:,None] - path_loss + bias[:,None] + fading)
 
 
 class mmWaveChannel:
@@ -62,9 +62,10 @@ class mmWaveChannel:
 		BS_x, BS_y = position_BS
 		UE_x, UE_y = position_UE
 		num_BS = BS_x.shape[0]
-		shadowing_LOS = s.lognorm.rvs(s=self.shadow_std_LOS, size=num_BS)
-		shadowing_NLOS = s.lognorm.rvs(s=self.shadow_std_NLOS, size=num_BS)
-		distance = m.sqrt(m.pow(BS_x-UE_x,2) - m.pow(BS_y-UE_y,2))
+		num_UE = UE_x.shape[0]
+		shadowing_LOS = s.lognorm.rvs(s=self.shadow_std_LOS, size=(num_BS,num_UE))
+		shadowing_NLOS = s.lognorm.rvs(s=self.shadow_std_NLOS, size=(num_BS,num_UE))
+		distance = m.sqrt(m.pow(BS_x[:, None]-UE_x,2) - m.pow(BS_y[:, None]-UE_y,2))
 		path_loss_LOS = self.fixed_path_loss + 10*self.alphaLOS*m.log10(distance) + shadowing_LOS
 		path_loss_NLOS = self.fixed_path_loss + 10*self.alphaNLOS*m.log10(distance) + shadowing_NLOS
 
@@ -73,7 +74,7 @@ class mmWaveChannel:
 		return path_loss
 
 	def get_received_power(self, power_transmitted, gain, fading, path_loss, bias):
-		return (power_transmitted + gain - path_loss + bias + fading)
+		return (power_transmitted[:,None] + gain[:,None] - path_loss + bias[:,None] + fading)
 
 
 class THzChannel:
@@ -94,10 +95,10 @@ class THzChannel:
 		BS_x, BS_y = position_BS
 		UE_x, UE_y = position_UE
 		
-		distance = m.sqrt(m.pow(BS_x-UE_x,2) - m.pow(BS_y-UE_y,2))
+		distance = m.sqrt(m.pow(BS_x[:, None]-UE_x,2) - m.pow(BS_y[:, None]-UE_y,2))
 		path_loss = self.path_loss_absorption(distance) + self.path_loss_spread(distance)
 
 		return path_loss
 
 	def get_received_power(self, power_transmitted, gain, fading, path_loss, bias):
-		return (power_transmitted + gain - path_loss + bias + fading)
+		return (power_transmitted[:,None] + gain[:,None] - path_loss + bias[:,None] + fading)
