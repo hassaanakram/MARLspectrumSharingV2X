@@ -102,3 +102,40 @@ class THzChannel:
 
 	def get_received_power(self, power_transmitted, gain, fading, path_loss, bias):
 		return (power_transmitted[:,None] + gain[:,None] - path_loss + bias[:,None] + fading)
+
+
+class BaseStation:
+	def __init__(self, power_transmitted, gain, channel):
+		self.power_transmitted = power_transmitted
+		self.gain = gain
+		self.channel = channel
+
+class UserEquipment:
+	def __init__(self, channel):
+		self.channel = channel
+
+class Environment:
+	def __init__(self):
+		self.MBSChannel = MBSChannel()
+		self.mmWaveChannel = mmWaveChannel()
+		self.THzChannel = THzChannel()
+		self.BS_MBS = []
+		self.BS_mmWave = []
+		self.BS_THz = []
+		self.UE_MBS = []
+		self.UE_mmWave = []
+		self.UE_THz = []
+
+		self.area = 500*500
+		self.lambda_MBS = 4e-6
+		self.lambda_mmWave = self.lambda_MBS*2
+		self.lambda_THz = self.lambda_MBS*6
+		self.lambda_UE = 0.0012 # Should give around 30 users
+
+		
+
+		 
+
+
+
+
