@@ -8,10 +8,10 @@ np.random.seed(123)
 c = 3E8
 
 class MBSChannel:
-	def __init__(self):
+	def __init__(self, alpha):
 		self.frequency = 2.4
 		self.bandwidth = 20E6
-		self.alpha = 0.5
+		self.alpha = alpha
 		self.shadow_mean = 0
 		self.shadow_std = 4
 		self.beta = 3
@@ -116,31 +116,32 @@ class UserEquipment:
 		self.received_power = -100
 
 class Environment:
-	def __init__(self, prob_LOS, prob_NLOS):
-		self.MBSChannel = MBSChannel()
-		self.mmWaveChannel = mmWaveChannel(prob_LOS ,prob_NLOS)
-		self.THzChannel = THzChannel()
+	def __init__(self, alpha):
+		self.MBSChannel = MBSChannel(alpha)
+		#self.mmWaveChannel = mmWaveChannel(prob_LOS ,prob_NLOS)
+		#self.THzChannel = THzChannel()
 		self.BS_MBS = []
-		self.BS_mmWave = []
-		self.BS_THz = []
+		#self.BS_mmWave = []
+		#self.BS_THz = []
 		self.UE = []
-		self.UE_MBS = []
-		self.UE_mmWave = []
-		self.UE_THz = []
-
+		#self.UE_MBS = []
+		#self.UE_mmWave = []
+		#self.UE_THz = []
+		self.transmit_powers = []
 		self.area = 500*500
 		self.lambda_MBS = 4e-6
-		self.lambda_mmWave = self.lambda_MBS*2
-		self.lambda_THz = self.lambda_MBS*6
-		self.lambda_UE = 0.0012 # Should give around 30 users
+		#self.lambda_mmWave = self.lambda_MBS*2
+		#self.lambda_THz = self.lambda_MBS*6
+		#self.lambda_UE = 0.0012 # Should give around 30 users
 
 		self.MBS_powers = [40, 30, 20, 5, -100]
-		self.mmWave_powers = [43, 33, 23, 7, -100]
-		self.THz_powers = [46, 36, 26, 10, -100]
+		#self.mmWave_powers = [43, 33, 23, 7, -100]
+		#self.THz_powers = [46, 36, 26, 10, -100]
 
+		
 	# State change is triggered by a change in LOS/NLOS Probabilites
-	def renew_probabilities(self, prob_LOS, prob_NLOS):
-		self.mmWaveChannel = mmWaveChannel(prob_LOS, prob_NLOS)
+	def renew_channel(self, alpha):
+		self.MBSChannel = MBSChannel(alpha)
 	
 	def add_UE(self):
 		self.n_UE = s.poisson(self.lambda_UE).rvs((1,1))
@@ -148,33 +149,36 @@ class Environment:
 			self.UE.append(UserEquipment(None))
 	
 
-	def add_BS(self, channels):
+	def add_BS(self):
 		self.n_BS_MBS = s.poisson(self.lambda_MBS).rvs((1,1))
-		self.n_BS_mmWave = s.poisson(self.lambda_mmWave).rvs((1,1))
-		self.n_BS_THz = s.poisson(self.lambda_THz).rvs((1,1))
+		#self.n_BS_mmWave = s.poisson(self.lambda_mmWave).rvs((1,1))
+		#self.n_BS_THz = s.poisson(self.lambda_THz).rvs((1,1))
 
 		for i in range(self.n_BS_MBS):
-			self.BS_MBS.append(BaseStation(-100, 0, channels[0]))
+			self.BS_MBS.append(BaseStation(-100, 0, self.MBSChannel))
 
-		for i in range(self.n_BS_mmWave):
-			self.BS_mmWave.append(BaseStation(-100, 7, channels[1]))
+		#for i in range(self.n_BS_mmWave):
+		#	self.BS_mmWave.append(BaseStation(-100, 7, channels[1]))
 
-		for i in range(self.n_BS_THz):
-			self.BS_THz.append(BaseStation(-100, 10, channels[2]))
+		#for i in range(self.n_BS_THz):
+		#	self.BS_THz.append(BaseStation(-100, 10, channels[2]))
 
 
 	def new_random_game(self):
 		self.UE = []
-		self.UE_MBS = []
-		self.UE_mmWave = []
-		self.UE_THz = []
+		#self.UE_MBS = []
+		#self.UE_mmWave = []
+		#self.UE_THz = []
 		self.BS_MBS = []
-		self.BS_mmWave = []
-		self.BS_THz = []
+		#self.BS_mmWave = []
+		#self.BS_THz = []
 
 		self.add_UE()
-		self.add_BS([self.MBSChannel, self.mmWaveChannel, self.THzChannel])
+		self.add_BS()
+
+		self.transmit_powers = [bs.power_transmitted for bs in self.BS_MBS]
 		
+
 
 
 
