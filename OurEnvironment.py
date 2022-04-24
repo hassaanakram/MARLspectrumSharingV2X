@@ -29,9 +29,9 @@ class MBSChannel:
 		shadowing = s.lognorm.rvs(s=self.shadow_std, size=(num_BS, num_UE))
 		# m.pow(BS_x-UE_x,2) = m.pow(BS_y-UE_y,2): NxK vectors
 		# distance: NxK matrix: Distance of each BS from each user
-		distance = m.sqrt(m.pow(BS_x[:, None]-UE_x,2) - m.pow(BS_y[:, None]-UE_y,2))
+		distance = np.power(np.power(BS_x[:, None]-UE_x,2) + np.power(BS_y[:, None]-UE_y,2), 1/2)
 		# path_loss: NxK matrix (hopefully)
-		path_loss = 10*m.log10((4*m.pi*self.frequency)/c) + 10*self.beta*m.log10(distance)+shadowing
+		path_loss = 10*np.log10((4*m.pi*self.frequency)/c) + 10*self.beta*np.log10(distance)+shadowing
 
 		return path_loss
 
@@ -41,7 +41,7 @@ class MBSChannel:
 		# bias: Nx1
 		# fading: NxK
 		# path_loss: NxK
-		return (power_transmitted[:,None] + gain[:,None] - path_loss + bias[:,None] + fading)
+		return (np.array(power_transmitted)[:,None] + np.array(gain)[:,None] - path_loss + bias + fading)
 
 
 class mmWaveChannel:
@@ -65,7 +65,7 @@ class mmWaveChannel:
 		num_UE = UE_x.shape[0]
 		shadowing_LOS = s.lognorm.rvs(s=self.shadow_std_LOS, size=(num_BS,num_UE))
 		shadowing_NLOS = s.lognorm.rvs(s=self.shadow_std_NLOS, size=(num_BS,num_UE))
-		distance = m.sqrt(m.pow(BS_x[:, None]-UE_x,2) - m.pow(BS_y[:, None]-UE_y,2))
+		distance = np.power(np.power(BS_x[:, None]-UE_x,2) + np.power(BS_y[:, None]-UE_y,2), 1/2)
 		path_loss_LOS = self.fixed_path_loss + 10*self.alphaLOS*m.log10(distance) + shadowing_LOS
 		path_loss_NLOS = self.fixed_path_loss + 10*self.alphaNLOS*m.log10(distance) + shadowing_NLOS
 
@@ -74,7 +74,7 @@ class mmWaveChannel:
 		return path_loss
 
 	def get_received_power(self, power_transmitted, gain, fading, path_loss, bias):
-		return (power_transmitted[:,None] + gain[:,None] - path_loss + bias[:,None] + fading)
+		return (power_transmitted[:,None] + gain[:,None] - path_loss + bias + fading)
 
 
 class THzChannel:
@@ -95,25 +95,29 @@ class THzChannel:
 		BS_x, BS_y = position_BS
 		UE_x, UE_y = position_UE
 		
-		distance = m.sqrt(m.pow(BS_x[:, None]-UE_x,2) - m.pow(BS_y[:, None]-UE_y,2))
+		distance = np.power(np.power(BS_x[:, None]-UE_x,2) + np.power(BS_y[:, None]-UE_y,2), 1/2)
 		path_loss = self.path_loss_absorption(distance) + self.path_loss_spread(distance)
 
 		return path_loss
 
 	def get_received_power(self, power_transmitted, gain, fading, path_loss, bias):
-		return (power_transmitted[:,None] + gain[:,None] - path_loss + bias[:,None] + fading)
+		return (power_transmitted[:,None] + gain[:,None] - path_loss + bias + fading)
 
 
 class BaseStation:
-	def __init__(self, power_transmitted, gain, channel):
+	def __init__(self, power_transmitted, gain, channel, x, y):
 		self.power_transmitted = power_transmitted
 		self.gain = gain
 		self.channel = channel
+		self.x_coord = x
+		self.y_coord = y
 
 class UserEquipment:
-	def __init__(self, channel):
+	def __init__(self, channel, x, y):
 		self.channel = channel
-		self.received_power = -100
+		self.received_power = -80
+		self.x_coord = x
+		self.y_coord = y
 
 class Environment:
 	def __init__(self, alpha):
@@ -124,12 +128,15 @@ class Environment:
 		#self.BS_mmWave = []
 		#self.BS_THz = []
 		self.UE = []
+		self.n_BS_MBS = 0
+		self.n_UE = 0
 		#self.UE_MBS = []
 		#self.UE_mmWave = []
 		#self.UE_THz = []
 		self.transmit_powers = []
 		self.area = 500*500
-		self.lambda_MBS = 4e-6
+		self.lambda_MBS = 2
+		self.lambda_UE = 30
 		#self.lambda_mmWave = self.lambda_MBS*2
 		#self.lambda_THz = self.lambda_MBS*6
 		#self.lambda_UE = 0.0012 # Should give around 30 users
@@ -144,18 +151,28 @@ class Environment:
 		self.MBSChannel = MBSChannel(alpha)
 	
 	def add_UE(self):
-		self.n_UE = s.poisson(self.lambda_UE).rvs((1,1))
+		self.n_UE = s.poisson(self.lambda_UE).rvs(size=(1,1))
+		self.n_UE = self.n_UE[0,0]
+		if self.n_UE == 0:
+			self.n_UE = 1
 		for i in range(self.n_UE):
-			self.UE.append(UserEquipment(None))
+			x = s.norm.rvs((1,1))[0]
+			y = s.norm.rvs((1,1))[0]
+			self.UE.append(UserEquipment(self.MBSChannel,x,y))
 	
 
 	def add_BS(self):
-		self.n_BS_MBS = s.poisson(self.lambda_MBS).rvs((1,1))
+		self.n_BS_MBS = s.poisson(self.lambda_MBS).rvs(size=(1,1))
+		self.n_BS_MBS = self.n_BS_MBS[0,0]
+		if self.n_BS_MBS == 0:
+			self.n_BS_MBS = 1
 		#self.n_BS_mmWave = s.poisson(self.lambda_mmWave).rvs((1,1))
 		#self.n_BS_THz = s.poisson(self.lambda_THz).rvs((1,1))
 
 		for i in range(self.n_BS_MBS):
-			self.BS_MBS.append(BaseStation(-100, 0, self.MBSChannel))
+			x = s.norm.rvs((1,1))[0]
+			y = s.norm.rvs((1,1))[0]
+			self.BS_MBS.append(BaseStation(60, 0, self.MBSChannel,x,y))
 
 		#for i in range(self.n_BS_mmWave):
 		#	self.BS_mmWave.append(BaseStation(-100, 7, channels[1]))
@@ -164,7 +181,7 @@ class Environment:
 		#	self.BS_THz.append(BaseStation(-100, 10, channels[2]))
 
 
-	def new_random_game(self):
+	def reset(self):
 		self.UE = []
 		#self.UE_MBS = []
 		#self.UE_mmWave = []
@@ -174,10 +191,72 @@ class Environment:
 		#self.BS_THz = []
 
 		self.add_UE()
-		self.add_BS()
+		self.add_BS()		
 
-		self.transmit_powers = [bs.power_transmitted for bs in self.BS_MBS]
+		transmit_powers = [BS.power_transmitted for BS in self.BS_MBS]
+		return transmit_powers
+
+	def step(self, prev_received_powers, prev_transmit_powers):
+		# One step of our simulation: Calculate received powers for a 
+		# given state.
+		#! Actions: Values of optimization variables -> Transmit powers of BSs
+		#! action: (Nx1) vector where N is the number of BS (ONLY MBS FOR NOW)
+		#! AGENTS: BASE STATIONS -> MAXIMIZE GLOBAL RECEIVED POWER AT UE WHILE
+		#! MINIMIZING BS TRANSMIT POWERS
+		#TODO: Get recieved powers -> Compare with previous received powers stats ->
+		#TODO: give rewards based on new received powers
+
+		num_UE = len(self.UE)
+		num_BS = len(self.BS_MBS)
+		rewards = np.zeros((num_BS,1))
+
+		position_BS_x = np.array([BS.x_coord for BS in self.BS_MBS])
+		position_BS_y = np.array([BS.y_coord for BS in self.BS_MBS])
+		position_BS = (position_BS_x, position_BS_y)
+		position_UE_x = np.array([UE.x_coord for UE in self.UE])
+		position_UE_y = np.array([UE.y_coord for UE in self.UE])
+		position_UE = (position_UE_x, position_UE_y)
+
+		gains = [BS.gain for BS in self.BS_MBS]
+		transmit_powers = [BS.power_transmitted for BS in self.BS_MBS]
+		current_avg_transmit_power = np.nanmean(transmit_powers)
+		prev_avg_transmit_power = np.nanmean(prev_transmit_powers)
+		fading = s.nakagami(nu=3).rvs((num_BS, num_UE))
+		path_loss = self.MBSChannel.get_path_loss(position_BS, position_UE)
+
+		#* received_powers: numBS x numUE
+		received_powers = self.MBSChannel.get_received_power(
+						  transmit_powers,
+						  gains,
+						  fading,
+						  path_loss, 0
+		)
+		# Associate users with max recvd power BS
+		received_powers = np.nanmax(received_powers, axis=0)
+		for idx in range(num_UE):
+			self.UE[idx].received_power = received_powers[idx]
+
+		#! REWARD POLICY: AVERAGE RECEIVED POWER SHOULD INCREASE & AVG TRANSMIT POWER SHOULD DEC
+		#! GOING WITH A GLOBAL REWARD TO PROMOTE OVERALL BETTER SYSTEM
+		prev_avg_received_power = np.nanmean(prev_received_powers)
+		current_avg_received_power = np.nanmean(received_powers)
+		if prev_avg_received_power < current_avg_received_power:
+			rewards += 1
+		else:
+			rewards -= 1
 		
+		if prev_avg_transmit_power < current_avg_transmit_power:
+			rewards -= 1
+		else:
+			rewards += 1
+
+		state = transmit_powers
+
+		return rewards, state
+
+
+
+
 
 
 
