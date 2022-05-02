@@ -9,6 +9,7 @@ c = 3E8
 
 class MBSChannel:
 	def __init__(self, alpha):
+		self.name = 'MBS'
 		self.frequency = 2.4
 		self.bandwidth = 20E6
 		self.alpha = alpha
@@ -46,6 +47,7 @@ class MBSChannel:
 
 class mmWaveChannel:
 	def __init__(self, prob_LOS, prob_NLOS):
+		self.name = 'mmWave'
 		self.frequency = 73 # GHz
 		self.bandwidth = 2E9
 		self.alphaLOS = 2
@@ -79,6 +81,7 @@ class mmWaveChannel:
 
 class THzChannel:
 	def __init__(self):
+		self.name = 'THz'
 		self.frequency = 3E11
 		self.bandwidth = 10E9
 		self.kF = 0.0033 # some coefficient that rn i'm too tired to read about. the units are m-1
@@ -111,44 +114,52 @@ class BaseStation:
 		self.channel = channel
 		self.x_coord = x
 		self.y_coord = y
+		self.associated_users = []
 
 class UserEquipment:
-	def __init__(self, channel, x, y):
-		self.channel = channel
-		self.received_power = -80
+	def __init__(self, received_power, bandwidth, x, y):
+		self.base_station = None
+		self.received_power = received_power
+		self.bandwidth = bandwidth
 		self.x_coord = x
 		self.y_coord = y
 
 class Environment:
-	def __init__(self, alpha):
+	def __init__(self, alpha, prob_LOS, prob_NLOS, area, lambdas):
 		self.MBSChannel = MBSChannel(alpha)
-		#self.mmWaveChannel = mmWaveChannel(prob_LOS ,prob_NLOS)
-		#self.THzChannel = THzChannel()
-		self.BS_MBS = []
-		#self.BS_mmWave = []
-		#self.BS_THz = []
-		self.UE = []
-		self.n_BS_MBS = 0
-		self.n_UE = 0
-		#self.UE_MBS = []
-		#self.UE_mmWave = []
-		#self.UE_THz = []
-		self.transmit_powers = []
-		self.area = 500*500
-		self.lambda_MBS = 2
-		self.lambda_UE = 30
+		self.mmWaveChannel = mmWaveChannel(prob_LOS ,prob_NLOS)
+		self.THzChannel = THzChannel()
+		self.BS = {'MBS': [],
+				   'mmWave': [],
+				   'THz': []}
+		self.UE = {'MBS': [],
+				   'mmWave': [],
+				   'THz': []}
+
+		# Wrapper functions to get some D (D for data)
+		self.n_BS_MBS = lambda: len(self.BS['MBS'])
+		self.n_BS_mmWave = lambda: len(self.BS['mmWave'])
+		self.n_BS_THz = lambda: len(self.BS['THz'])
+		self.n_UE_MBS = lambda: len(self.UE['MBS'])
+		self.n_UE_mmWave = lambda: len(self.UE['mmWave'])
+		self.n_UE_THz = lambda: len(self.UE['THz'])
+		self.transmit_powers = {'MBS': lambda: [bs.power_transmitted for bs in self.BS['MBS']],
+								'mmWave': lambda: [bs.power_transmitted for bs in self.BS['mmWave']],
+								'THz': lambda: [bs.power_transmitted for bs in self.BS['THz']]}
+		self.area = area
+		self.lambda_MBS = lambdas['MBS']
+		self.lambda_mmWave = lambdas['mmWave']
+		self.lambda_THz = lambdas['THz']
+		self.lambda_UE = lambdas['UE']
 		#self.lambda_mmWave = self.lambda_MBS*2
 		#self.lambda_THz = self.lambda_MBS*6
 		#self.lambda_UE = 0.0012 # Should give around 30 users
 
-		self.MBS_powers = [40, 30, 20, 5, -100]
-		#self.mmWave_powers = [43, 33, 23, 7, -100]
-		#self.THz_powers = [46, 36, 26, 10, -100]
-
 		
-	# State change is triggered by a change in LOS/NLOS Probabilites
-	def renew_channel(self, alpha):
+	# State change is triggered by a change in LOS/NLOS Probabilites or alpha for MBS channel
+	def renew_channel(self, alpha, prob_LOS, prob_NLOS):
 		self.MBSChannel = MBSChannel(alpha)
+		self.mmWaveChannel = mmWaveChannel(prob_LOS, prob_NLOS)
 	
 	def add_UE(self):
 		self.n_UE = s.poisson(self.lambda_UE).rvs(size=(1,1))
