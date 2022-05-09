@@ -1,6 +1,7 @@
 from math import dist
 import numpy as np
 from numpy import math as m
+from pyparsing import Dict
 import scipy.stats as s
 import random
 
@@ -125,7 +126,7 @@ class UserEquipment:
 		self.y_coord = y
 
 class Environment:
-	def __init__(self, alpha, prob_LOS, prob_NLOS, area, lambdas):
+	def __init__(self, alpha, prob_LOS, prob_NLOS, area, lambdas: Dict):
 		self.MBSChannel = MBSChannel(alpha)
 		self.mmWaveChannel = mmWaveChannel(prob_LOS ,prob_NLOS)
 		self.THzChannel = THzChannel()
@@ -137,20 +138,17 @@ class Environment:
 				   'THz': []}
 
 		# Wrapper functions to get some D (D for data)
-		self.n_BS_MBS = lambda: len(self.BS['MBS'])
-		self.n_BS_mmWave = lambda: len(self.BS['mmWave'])
-		self.n_BS_THz = lambda: len(self.BS['THz'])
-		self.n_UE_MBS = lambda: len(self.UE['MBS'])
-		self.n_UE_mmWave = lambda: len(self.UE['mmWave'])
-		self.n_UE_THz = lambda: len(self.UE['THz'])
+		self.n_BS = {'MBS': lambda: len(self.BS['MBS']),
+					 'mmWave': lambda: len(self.BS['mmWave']),
+					 'THz': lambda: len(self.BS['THz'])}
+		self.n_UE = {'MBS': lambda: len(self.UE['MBS']),
+					 'mmWave': lambda: len(self.UE['mmWave']),
+					 'THz': lambda: len(self.UE['THz'])}
 		self.transmit_powers = {'MBS': lambda: [bs.power_transmitted for bs in self.BS['MBS']],
 								'mmWave': lambda: [bs.power_transmitted for bs in self.BS['mmWave']],
 								'THz': lambda: [bs.power_transmitted for bs in self.BS['THz']]}
 		self.area = area
-		self.lambda_MBS = lambdas['MBS']
-		self.lambda_mmWave = lambdas['mmWave']
-		self.lambda_THz = lambdas['THz']
-		self.lambda_UE = lambdas['UE']
+		self.lambdas = lambdas
 		#self.lambda_mmWave = self.lambda_MBS*2
 		#self.lambda_THz = self.lambda_MBS*6
 		#self.lambda_UE = 0.0012 # Should give around 30 users
@@ -162,28 +160,38 @@ class Environment:
 		self.mmWaveChannel = mmWaveChannel(prob_LOS, prob_NLOS)
 	
 	def add_UE(self):
-		self.n_UE = s.poisson(self.lambda_UE).rvs(size=(1,1))
-		self.n_UE = self.n_UE[0,0]
-		if self.n_UE == 0:
-			self.n_UE = 1
-		for i in range(self.n_UE):
+		n_UE = s.poisson(self.lambdas['UE']).rvs(size=(1,1))
+		n_UE = n_UE[0,0]
+		if n_UE == 0:
+			n_UE = 1
+		for i in range(n_UE):
 			x = s.norm.rvs((1,1))[0]
 			y = s.norm.rvs((1,1))[0]
-			self.UE.append(UserEquipment(self.MBSChannel,x,y))
+			# Initializing a UE with a received power of -100dBm and a bandwidth of 1Hz
+			self.UE.append(UserEquipment(-100, 1, x, y))
 	
 
 	def add_BS(self):
-		self.n_BS_MBS = s.poisson(self.lambda_MBS).rvs(size=(1,1))
-		self.n_BS_MBS = self.n_BS_MBS[0,0]
-		if self.n_BS_MBS == 0:
-			self.n_BS_MBS = 1
-		#self.n_BS_mmWave = s.poisson(self.lambda_mmWave).rvs((1,1))
-		#self.n_BS_THz = s.poisson(self.lambda_THz).rvs((1,1))
+		n_BS = dict()
+		for tier in self.lambdas:
+			n_BS[tier] = (s.poisson(self.lambdas[tier]).rvs(size=(1,1)))[0,0]
+			if n_BS[tier] == 0:
+				n_BS[tier] = 1
 
-		for i in range(self.n_BS_MBS):
-			x = s.norm.rvs((1,1))[0]
-			y = s.norm.rvs((1,1))[0]
-			self.BS_MBS.append(BaseStation(60, 0, self.MBSChannel,x,y))
+		for tier in n_BS:
+			if tier == 'MBS':
+				transmit_power = 40
+				gain = 0
+			elif tier == 'mmWave':
+				transmit_power = 30
+				gain = 
+			elif tier == 'THz':
+				transmit_power = 20
+			for i in range(n_BS[tier]):
+				x = s.norm.rvs((1,1))[0]
+				y = s.norm.rvs((1,1))[0]
+				
+				self.BS_MBS.append(BaseStation(20, 0, self.MBSChannel,x,y))
 
 		#for i in range(self.n_BS_mmWave):
 		#	self.BS_mmWave.append(BaseStation(-100, 7, channels[1]))
