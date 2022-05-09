@@ -127,15 +127,16 @@ class UserEquipment:
 
 class Environment:
 	def __init__(self, alpha, prob_LOS, prob_NLOS, area, lambdas: Dict):
-		self.MBSChannel = MBSChannel(alpha)
-		self.mmWaveChannel = mmWaveChannel(prob_LOS ,prob_NLOS)
-		self.THzChannel = THzChannel()
+		self.channels = {'MBS': MBSChannel(alpha),
+						 'mmWave': mmWaveChannel(prob_LOS, prob_NLOS),
+						 'THz': THzChannel()}
 		self.BS = {'MBS': [],
 				   'mmWave': [],
 				   'THz': []}
 		self.UE = {'MBS': [],
 				   'mmWave': [],
-				   'THz': []}
+				   'THz': [],
+				   'Init': []}
 
 		# Wrapper functions to get some D (D for data)
 		self.n_BS = {'MBS': lambda: len(self.BS['MBS']),
@@ -143,7 +144,8 @@ class Environment:
 					 'THz': lambda: len(self.BS['THz'])}
 		self.n_UE = {'MBS': lambda: len(self.UE['MBS']),
 					 'mmWave': lambda: len(self.UE['mmWave']),
-					 'THz': lambda: len(self.UE['THz'])}
+					 'THz': lambda: len(self.UE['THz']),
+					 'Init': lambda: len(self.UE['Init'])}
 		self.transmit_powers = {'MBS': lambda: [bs.power_transmitted for bs in self.BS['MBS']],
 								'mmWave': lambda: [bs.power_transmitted for bs in self.BS['mmWave']],
 								'THz': lambda: [bs.power_transmitted for bs in self.BS['THz']]}
@@ -156,8 +158,8 @@ class Environment:
 		
 	# State change is triggered by a change in LOS/NLOS Probabilites or alpha for MBS channel
 	def renew_channel(self, alpha, prob_LOS, prob_NLOS):
-		self.MBSChannel = MBSChannel(alpha)
-		self.mmWaveChannel = mmWaveChannel(prob_LOS, prob_NLOS)
+		self.channels['MBS'] = MBSChannel(alpha)
+		self.channels['mmWave'] = mmWaveChannel(prob_LOS, prob_NLOS)
 	
 	def add_UE(self):
 		n_UE = s.poisson(self.lambdas['UE']).rvs(size=(1,1))
@@ -168,7 +170,8 @@ class Environment:
 			x = s.norm.rvs((1,1))[0]
 			y = s.norm.rvs((1,1))[0]
 			# Initializing a UE with a received power of -100dBm and a bandwidth of 1Hz
-			self.UE.append(UserEquipment(-100, 1, x, y))
+			#! TIER ASSOCIATION AT INITIALIZATION: NONE. THE INIT LIST STORES THE UE WITHOUT ANY ASSOCIATED BS
+			self.UE['Init'].append(UserEquipment(-100, 1, x, y))
 	
 
 	def add_BS(self):
@@ -180,44 +183,38 @@ class Environment:
 
 		for tier in n_BS:
 			if tier == 'MBS':
-				transmit_power = 40
+				transmit_power = 20
 				gain = 0
 			elif tier == 'mmWave':
-				transmit_power = 30
-				gain = 
+				transmit_power = 21
+				gain = 20
 			elif tier == 'THz':
-				transmit_power = 20
+				transmit_power = 23
+				gain = 24
 			for i in range(n_BS[tier]):
 				x = s.norm.rvs((1,1))[0]
 				y = s.norm.rvs((1,1))[0]
-				
-				self.BS_MBS.append(BaseStation(20, 0, self.MBSChannel,x,y))
-
-		#for i in range(self.n_BS_mmWave):
-		#	self.BS_mmWave.append(BaseStation(-100, 7, channels[1]))
-
-		#for i in range(self.n_BS_THz):
-		#	self.BS_THz.append(BaseStation(-100, 10, channels[2]))
+				self.BS_MBS.append(BaseStation(transmit_power, gain, self.channels[tier],x,y))
 
 
 	def reset(self):
-		self.UE = []
+		pass
+		#self.UE = []
 		#self.UE_MBS = []
 		#self.UE_mmWave = []
 		#self.UE_THz = []
-		self.BS_MBS = []
+		#self.BS_MBS = []
 		#self.BS_mmWave = []
 		#self.BS_THz = []
 
-		self.add_UE()
-		self.add_BS()		
+		#self.add_UE()
+		#self.add_BS()		
 
-		transmit_powers = [BS.power_transmitted for BS in self.BS_MBS]
-		return transmit_powers
+		#transmit_powers = [BS.power_transmitted for BS in self.BS_MBS]
+		#return transmit_powers
 
 	def step(self, prev_received_powers, prev_transmit_powers):
-		# One step of our simulation: Calculate received powers for a 
-		# given state.
+		#! One step: - Calculate received powers, associate, get DR, get DR Coverage, get PE
 		#! Actions: Values of optimization variables -> Transmit powers of BSs
 		#! action: (Nx1) vector where N is the number of BS (ONLY MBS FOR NOW)
 		#! AGENTS: BASE STATIONS -> MAXIMIZE GLOBAL RECEIVED POWER AT UE WHILE
