@@ -16,6 +16,7 @@ class MBSChannel:
 		self.alpha = alpha
 		self.shadow_mean = 0
 		self.shadow_std = 4
+		self.fading_mu = 3
 		self.beta = 3
 
 	def get_path_loss(self, position_BS, position_UE):
@@ -57,6 +58,7 @@ class mmWaveChannel:
 		self.shadow_N_mean = 0
 		self.shadow_L_std = 5.2
 		self.shadow_N_std = 7.2
+		self.fading_mu = 4
 		self.prob_LOS = prob_LOS
 		self.prob_NLOS = prob_NLOS
 		self.fixed_path_loss = 32.4 + 20*m.log10(self.frequency)
@@ -85,6 +87,7 @@ class THzChannel:
 		self.name = 'THz'
 		self.frequency = 3E11
 		self.bandwidth = 10E9
+		self.fading_mu = 5.2
 		self.kF = 0.0033 # some coefficient that rn i'm too tired to read about. the units are m-1
 
 	def path_loss_absorption(self, distance):
@@ -109,9 +112,10 @@ class THzChannel:
 
 
 class BaseStation:
-	def __init__(self, power_transmitted, gain, channel, x, y):
+	def __init__(self, power_transmitted, gain, bias, channel, x, y):
 		self.power_transmitted = power_transmitted
 		self.gain = gain
+		self.bias = bias
 		self.channel = channel
 		self.x_coord = x
 		self.y_coord = y
@@ -133,19 +137,20 @@ class Environment:
 		self.BS = {'MBS': [],
 				   'mmWave': [],
 				   'THz': []}
-		self.UE = {'MBS': [],
-				   'mmWave': [],
-				   'THz': [],
-				   'Init': []}
-
+		#self.UE = {'MBS': [],
+		#		   'mmWave': [],
+		#		   'THz': [],
+		#		   'Init': []}
+		self.UE = []
 		# Wrapper functions to get some D (D for data)
 		self.n_BS = {'MBS': lambda: len(self.BS['MBS']),
 					 'mmWave': lambda: len(self.BS['mmWave']),
 					 'THz': lambda: len(self.BS['THz'])}
-		self.n_UE = {'MBS': lambda: len(self.UE['MBS']),
-					 'mmWave': lambda: len(self.UE['mmWave']),
-					 'THz': lambda: len(self.UE['THz']),
-					 'Init': lambda: len(self.UE['Init'])}
+		#self.n_UE = {'MBS': lambda: len(self.UE['MBS']),
+		#			 'mmWave': lambda: len(self.UE['mmWave']),
+		#			 'THz': lambda: len(self.UE['THz']),
+		#			 'Init': lambda: len(self.UE['Init'])}
+		self.n_UE = lambda: len(self.UE)
 		self.transmit_powers = {'MBS': lambda: [bs.power_transmitted for bs in self.BS['MBS']],
 								'mmWave': lambda: [bs.power_transmitted for bs in self.BS['mmWave']],
 								'THz': lambda: [bs.power_transmitted for bs in self.BS['THz']]}
@@ -170,31 +175,25 @@ class Environment:
 			x = s.norm.rvs((1,1))[0]
 			y = s.norm.rvs((1,1))[0]
 			# Initializing a UE with a received power of -100dBm and a bandwidth of 1Hz
-			#! TIER ASSOCIATION AT INITIALIZATION: NONE. THE INIT LIST STORES THE UE WITHOUT ANY ASSOCIATED BS
-			self.UE['Init'].append(UserEquipment(-100, 1, x, y))
+			self.UE.append(UserEquipment(-100, 1, x, y))
 	
 
 	def add_BS(self):
-		n_BS = dict()
+		n_BS = {}
+		transmit_power = {'MBS': 20, 'mmWave': 21, 'THz': 23}
+		gain = {'MBS': 0, 'mmWave': 20, 'THz': 24}
+		bias = {'MBS': 0, 'mmWave': 5, 'THz': 7}
+
 		for tier in self.lambdas:
 			n_BS[tier] = (s.poisson(self.lambdas[tier]).rvs(size=(1,1)))[0,0]
 			if n_BS[tier] == 0:
 				n_BS[tier] = 1
 
 		for tier in n_BS:
-			if tier == 'MBS':
-				transmit_power = 20
-				gain = 0
-			elif tier == 'mmWave':
-				transmit_power = 21
-				gain = 20
-			elif tier == 'THz':
-				transmit_power = 23
-				gain = 24
 			for i in range(n_BS[tier]):
 				x = s.norm.rvs((1,1))[0]
 				y = s.norm.rvs((1,1))[0]
-				self.BS_MBS.append(BaseStation(transmit_power, gain, self.channels[tier],x,y))
+				self.BS[tier].append(BaseStation(transmit_power[tier], gain[tier], bias[tier], self.channels[tier],x,y))
 
 
 	def reset(self):
@@ -213,33 +212,42 @@ class Environment:
 		#transmit_powers = [BS.power_transmitted for BS in self.BS_MBS]
 		#return transmit_powers
 
-	def step(self, prev_received_powers, prev_transmit_powers):
+	def step(self, prev_state):
 		#! One step: - Calculate received powers, associate, get DR, get DR Coverage, get PE
 		#! Actions: Values of optimization variables -> Transmit powers of BSs
-		#! action: (Nx1) vector where N is the number of BS (ONLY MBS FOR NOW)
-		#! AGENTS: BASE STATIONS -> MAXIMIZE GLOBAL RECEIVED POWER AT UE WHILE
-		#! MINIMIZING BS TRANSMIT POWERS
-		#TODO: Get recieved powers -> Compare with previous received powers stats ->
-		#TODO: give rewards based on new received powers
+		#! AGENTS: BASE STATIONS -> Maximize DR Coverage and Power Efficiency while minimizing Transmit powers
+		#! Rewards: Dict with a list for each tier
+		# Unpacking prev state
+		#* prev_transmit_power is a dict
+		prev_transmit_power, prev_received_power, prev_dr_coverage, prev_pe = prev_state
 
-		num_UE = len(self.UE)
-		num_BS = len(self.BS_MBS)
-		rewards = np.zeros((num_BS,1))
+		rewards = {}
+		position_BS = {}
+		gains = {}
+		transmit_powers = {}
+		current_avg_transmit_power = {}
+		prev_avg_transmit_power = {}
+		fading = {}
+		path_loss = {}
+		received_powers = {}
 
-		position_BS_x = np.array([BS.x_coord for BS in self.BS_MBS])
-		position_BS_y = np.array([BS.y_coord for BS in self.BS_MBS])
-		position_BS = (position_BS_x, position_BS_y)
-		position_UE_x = np.array([UE.x_coord for UE in self.UE])
-		position_UE_y = np.array([UE.y_coord for UE in self.UE])
-		position_UE = (position_UE_x, position_UE_y)
+		position_UE = (np.array([UE.x_coord for UE in self.UE]), np.array([UE.y_coord for UE in self.UE]))
+		for tier in ['MBS', 'mmWave', 'THz']:
+			rewards[tier] = np.zeros((self.n_BS[tier],1))
+			position_BS[tier] = (np.array([BS.x_coord for BS in self.BS[tier]]), np.array([BS.y_coord for BS in self.BS[tier]]))
+			gains[tier] = [BS.gain for BS in self.BS[tier]]
+			transmit_powers[tier] = [BS.power_transmitted for BS in self.BS[tier]]
+			current_avg_transmit_power[tier] = np.nanmean(transmit_powers[tier])
+			prev_avg_transmit_power[tier] = np.nanmean(prev_transmit_power[tier])
+			fading[tier] = s.nakagami(self.channels[tier].fading_mu).rvs((self.n_BS[tier], self.n_UE))
+			path_loss[tier] = self.channels[tier].get_path_loss(position_BS[tier], position_UE)
+			received_powers[tier] = self.channels[tier].get_received_power(
+									transmit_powers[tier],
+									gains[tier],
+									fading[tier],
+									path_loss[tier],
 
-		gains = [BS.gain for BS in self.BS_MBS]
-		transmit_powers = [BS.power_transmitted for BS in self.BS_MBS]
-		current_avg_transmit_power = np.nanmean(transmit_powers)
-		prev_avg_transmit_power = np.nanmean(prev_transmit_powers)
-		fading = s.nakagami(nu=3).rvs((num_BS, num_UE))
-		path_loss = self.MBSChannel.get_path_loss(position_BS, position_UE)
-
+			)
 		#* received_powers: numBS x numUE
 		received_powers = self.MBSChannel.get_received_power(
 						  transmit_powers,
