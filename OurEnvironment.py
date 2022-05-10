@@ -44,7 +44,7 @@ class MBSChannel:
 		# bias: Nx1
 		# fading: NxK
 		# path_loss: NxK
-		return (np.array(power_transmitted)[:,None] + np.array(gain)[:,None] - path_loss + bias + fading)
+		return (np.array(power_transmitted)[:,None] + gain[:,None] - path_loss + bias[:,None] + fading)
 
 
 class mmWaveChannel:
@@ -79,7 +79,7 @@ class mmWaveChannel:
 		return path_loss
 
 	def get_received_power(self, power_transmitted, gain, fading, path_loss, bias):
-		return (power_transmitted[:,None] + gain[:,None] - path_loss + bias + fading)
+		return (power_transmitted[:,None] + gain[:,None] - path_loss + bias[:,None] + fading)
 
 
 class THzChannel:
@@ -108,7 +108,7 @@ class THzChannel:
 		return path_loss
 
 	def get_received_power(self, power_transmitted, gain, fading, path_loss, bias):
-		return (power_transmitted[:,None] + gain[:,None] - path_loss + bias + fading)
+		return (power_transmitted[:,None] + gain[:,None] - path_loss + bias[:,None] + fading)
 
 
 class BaseStation:
@@ -224,6 +224,7 @@ class Environment:
 		rewards = {}
 		position_BS = {}
 		gains = {}
+		bias = {}
 		transmit_powers = {}
 		current_avg_transmit_power = {}
 		prev_avg_transmit_power = {}
@@ -235,7 +236,8 @@ class Environment:
 		for tier in ['MBS', 'mmWave', 'THz']:
 			rewards[tier] = np.zeros((self.n_BS[tier],1))
 			position_BS[tier] = (np.array([BS.x_coord for BS in self.BS[tier]]), np.array([BS.y_coord for BS in self.BS[tier]]))
-			gains[tier] = [BS.gain for BS in self.BS[tier]]
+			gains[tier] = np.array([BS.gain for BS in self.BS[tier]])
+			bias[tier] = np.array([BS.bias for BS in self.BS[tier]])
 			transmit_powers[tier] = [BS.power_transmitted for BS in self.BS[tier]]
 			current_avg_transmit_power[tier] = np.nanmean(transmit_powers[tier])
 			prev_avg_transmit_power[tier] = np.nanmean(prev_transmit_power[tier])
@@ -246,15 +248,9 @@ class Environment:
 									gains[tier],
 									fading[tier],
 									path_loss[tier],
-
+									bias[tier]
 			)
-		#* received_powers: numBS x numUE
-		received_powers = self.MBSChannel.get_received_power(
-						  transmit_powers,
-						  gains,
-						  fading,
-						  path_loss, 0
-		)
+
 		# Associate users with max recvd power BS
 		received_powers = np.nanmax(received_powers, axis=0)
 		for idx in range(num_UE):
