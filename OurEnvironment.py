@@ -1,4 +1,5 @@
 from math import dist
+import re
 import numpy as np
 from numpy import math as m
 from pyparsing import Dict
@@ -112,20 +113,22 @@ class THzChannel:
 
 
 class BaseStation:
-	def __init__(self, power_transmitted, gain, bias, channel, x, y):
+	def __init__(self, power_transmitted, gain, bias, bandwidth, channel, x, y):
 		self.power_transmitted = power_transmitted
 		self.gain = gain
 		self.bias = bias
+		self.bandwidth = bandwidth
 		self.channel = channel
 		self.x_coord = x
 		self.y_coord = y
-		self.associated_users = []
+		self.associated_UE = 0
 
 class UserEquipment:
 	def __init__(self, received_power, bandwidth, x, y):
 		self.base_station = None
 		self.received_power = received_power
 		self.bandwidth = bandwidth
+		self.data_rate = 0
 		self.x_coord = x
 		self.y_coord = y
 
@@ -190,10 +193,11 @@ class Environment:
 				n_BS[tier] = 1
 
 		for tier in n_BS:
+			bandwidth_per_BS = self.channels[tier].bandwidth / n_BS[tier]
 			for i in range(n_BS[tier]):
 				x = s.norm.rvs((1,1))[0]
 				y = s.norm.rvs((1,1))[0]
-				self.BS[tier].append(BaseStation(transmit_power[tier], gain[tier], bias[tier], self.channels[tier],x,y))
+				self.BS[tier].append(BaseStation(transmit_power[tier], gain[tier], bias[tier], bandwidth_per_BS, self.channels[tier],x,y))
 
 
 	def reset(self):
@@ -231,6 +235,8 @@ class Environment:
 		fading = {}
 		path_loss = {}
 		received_powers = {}
+		best_BS = {} # To store index of max recvd power for each tier. index will be used to figure out 
+								 # the BS giving max power in each tier. 
 
 		position_UE = (np.array([UE.x_coord for UE in self.UE]), np.array([UE.y_coord for UE in self.UE]))
 		for tier in ['MBS', 'mmWave', 'THz']:
@@ -243,6 +249,8 @@ class Environment:
 			prev_avg_transmit_power[tier] = np.nanmean(prev_transmit_power[tier])
 			fading[tier] = s.nakagami(self.channels[tier].fading_mu).rvs((self.n_BS[tier], self.n_UE))
 			path_loss[tier] = self.channels[tier].get_path_loss(position_BS[tier], position_UE)
+
+			#* received_powers[tier]: n_BS[tier] x n_UE matrix
 			received_powers[tier] = self.channels[tier].get_received_power(
 									transmit_powers[tier],
 									gains[tier],
@@ -250,11 +258,27 @@ class Environment:
 									path_loss[tier],
 									bias[tier]
 			)
+			#* received_powers_max[tier] = 1 x n_UE vector
+			best_BS[tier] = np.argmax(received_powers[tier], axis=0)
+			
+		# Associate UE with BS
+		best_BS_ue = {}
+		for idx in range(self.n_UE):
+			# all this spaghetti to figure out the best BS
+			best_BS_ue['MBS'] = best_BS['MBS'][idx]
+			best_BS_ue['mmWave'] = best_BS['mmWave'][idx]
+			best_BS_ue['THz'] = best_BS['THz'][idx]
+			best_BS_tier = max(zip(best_BS_ue.values(), best_BS_ue.keys()))[1]
+			BS_number = best_BS[tier][idx]
+			self.UE[idx].base_station = self.BS[best_BS_tier][BS_number]
+			self.BS[best_BS_tier][BS_number].associated_UE += 1
 
-		# Associate users with max recvd power BS
-		received_powers = np.nanmax(received_powers, axis=0)
-		for idx in range(num_UE):
-			self.UE[idx].received_power = received_powers[idx]
+			# now the powers
+			self.UE[idx].received_power = (received_powers[best_BS_tier])[BS_number][idx]
+
+		# need a new loop for bandwidth
+		for idx in range(self.n_UE):
+			self.UE[idx].bandwidth = self.UE[idx].base_station.bandwidth / self.UE[idx].base_station.associated_UE
 
 		#! REWARD POLICY: AVERAGE RECEIVED POWER SHOULD INCREASE & AVG TRANSMIT POWER SHOULD DEC
 		#! GOING WITH A GLOBAL REWARD TO PROMOTE OVERALL BETTER SYSTEM
