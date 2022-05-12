@@ -223,7 +223,7 @@ class Environment:
 		#! Rewards: Dict with a list for each tier
 		# Unpacking prev state
 		#* prev_transmit_power is a dict
-		prev_transmit_power, prev_received_power, prev_dr_coverage, prev_pe = prev_state
+		prev_transmit_power, prev_received_powers, prev_dr_coverage, prev_pe = prev_state
 
 		rewards = {}
 		position_BS = {}
@@ -280,10 +280,20 @@ class Environment:
 		for idx in range(self.n_UE):
 			self.UE[idx].bandwidth = self.UE[idx].base_station.bandwidth / self.UE[idx].base_station.associated_UE
 
-		#! REWARD POLICY: AVERAGE RECEIVED POWER SHOULD INCREASE & AVG TRANSMIT POWER SHOULD DEC
+		#! REWARD POLICY: Average Received Power Inc, Each user should get more bandwidth, 
+		#! PE should increase
 		#! GOING WITH A GLOBAL REWARD TO PROMOTE OVERALL BETTER SYSTEM
+		# Received power
+		current_received_powers = np.array([UE.received_power for UE in self.UE])
+		current_avg_received_power = np.nanmean(current_received_powers)
 		prev_avg_received_power = np.nanmean(prev_received_powers)
-		current_avg_received_power = np.nanmean(received_powers)
+		
+		# transmit power
+		current_avg_transmit_power = sum(current_avg_transmit_power.values())
+		prev_avg_transmit_power = sum(prev_avg_transmit_power.values())
+
+		# Power Efficiency 
+
 		if prev_avg_received_power < current_avg_received_power:
 			rewards += 1
 		else:
@@ -294,7 +304,15 @@ class Environment:
 		else:
 			rewards += 1
 
-		state = transmit_powers
+		# Gives a list of lists for BS of each tier
+		BS_bandwidths = [self.BS[tier] for tier in ['MBS','mmWave','THz']]
+		# List of list of bandwidths 
+		for idx in range(len(BS_bandwidths)): 
+			bandwidths = [BS.bandwidth for BS in BS_bandwidths(idx)]
+			BS_bandwidths[idx] = bandwidths
+
+		state = [[transmit_powers[tier] for tier in ['MBS','mmWave','THz']],
+				  BS_bandwidths]
 
 		return rewards, state
 

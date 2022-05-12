@@ -3,14 +3,18 @@ from OurEnvironment import Environment
 import random
 import scipy.stats as s
 import numpy as np
-from tensorflow.keras import Sequential
+from tensorflow.keras import Sequential, Input, Model
 from collections import deque
 from tensorflow.keras.layers import Dense
 import matplotlib.pyplot as plt
 from tensorflow.keras.optimizers import Adam
 from tqdm import tqdm
 
-env = Environment(0.5)
+env_params = {'alpha':0.5, 'prob_LOS':0.7,
+              'prob_NLOS':0.3, 'area':500*500,
+              'lambdas':{'MBS':4E-6,'mmWave':8E-6,
+                         'THz':24E-6,'UE':0.0012}}
+env = Environment(**env_params)
 
 np.random.seed(0)
 
@@ -32,12 +36,44 @@ class DQN:
         self.memory = deque(maxlen=100000)
         self.model = self.build_model()
 
-    def build_model(self):
+    def build_model(self, n_BS: dict):
+        
+        input_MBS_power = Input(shape=(n_BS['MBS'],))
+        input_MBS_bandwidth = Input(shape=(n_BS['MBS'],))
+        input_mmWave_power = Input(shape=(n_BS['mmWave'],))
+        input_mmWave_bandwidth = Input(shape=(n_BS['mmWave'],))
+        input_THz_power = Input(shape=(n_BS['THz'],))
+        input_THz_bandwidth = Input(shape=(n_BS['THz'],))
+        
+        #* Dealing with powers and bandwidths separately 
+        x_MBS_power = Dense(64, activation='relu')(input_MBS_power)
+        x_mmWave_power = Dense(64, activation='relu')(input_mmWave_power)
+        x_THz_power = Dense(64, activation='relu')(input_THz_power)
 
-        model = Sequential()
-        model.add(Dense(64, input_shape=(self.state_space,), activation='relu'))
-        model.add(Dense(64, activation='relu'))
-        model.add(Dense(self.action_space, activation='linear'))
+        x_MBS_bandwidth = Dense(64, activation='leaky_relu')(input_MBS_bandwidth)
+        x_mmWave_bandwidth = Dense(64, activation='leaky_relu')(input_mmWave_bandwidth)
+        x_THz_bandwidth = Dense(64, activation='leaky_relu')(input_THz_bandwidth)
+
+        x_powers = x_MBS_power + x_mmWave_power + x_THz_power
+        x_bandwidths = x_MBS_bandwidth + x_mmWave_bandwidth + x_THz_bandwidth
+
+        x_powers = Dense(32, activation='relu')(x_powers)
+        x_bandwidths = Dense(32, activation='leaky_relu')(x_bandwidths)
+
+        output_MBS_power = Dense(n_BS['MBS'], activation='linear')(x_powers)
+        output_mmWave_power = Dense(n_BS['mmWave'], activation='linear')(x_powers)
+        output_THz_power = Dense(n_BS['THz'])(x_powers, activation='linear')
+
+        output_MBS_bandwidth = Dense(n_BS['MBS'], activation='linear')(x_bandwidths)
+        output_mmWave_bandwidth = Dense(n_BS['mmWave'], activation='linear')(x_bandwidths)
+        output_THz_bandwidth = Dense(n_BS['THz'], activation='linear')(x_bandwidths)
+
+        model = Model(inputs=[input_MBS_power,input_mmWave_power,input_THz_power,
+                              input_MBS_bandwidth, input_mmWave_bandwidth, input_THz_bandwidth],
+                      outputs=[output_MBS_power, output_mmWave_power, output_THz_power,
+                               output_MBS_bandwidth, output_mmWave_bandwidth, output_THz_bandwidth])
+        
+        
         model.compile(loss='mse', optimizer=Adam(lr=self.learning_rate))
         return model
 
@@ -47,9 +83,20 @@ class DQN:
     def act(self, state):
 
         if np.random.rand() <= self.epsilon:
-            return s.norm.rvs(size=(env.n_BS_MBS))
+            out_MBS_power = s.randint(20,40,size=(env.n_BS['MBS']))
+            out_mmWave_power = s.randint(22,40,size=(env.n_BS['mmWave']))
+            out_THz_power = s.randint(23,39,size=(env.n_BS['THz']))
+            
+            out_MBS_bandwidth = s.randint(1E6,10E6,size=(env.n_BS['MBS']))
+            out_mmWave_bandwidth = s.randint(1E9,2E9,size=(env.n_BS['mmWave']))
+            out_THz_bandwidth = s.randint(3E9,8E9,size=(env.n_BS['THz']))
+
+            random_outs = [out_MBS_power, out_mmWave_power, out_THz_power,
+                           out_MBS_bandwidth, out_mmWave_bandwidth, out_THz_bandwidth]
+
+            return random_outs
         act_values = self.model.predict(state)
-        return act_values[0]
+        return act_values
 
     def replay(self):
 
@@ -85,7 +132,7 @@ def train_dqn(episode):
     #state_space = 5
     max_steps = 1000
     state = env.reset()
-    action_space = env.n_BS_MBS
+    action_space = sum(env.n_BS.values())
     state_space = action_space
     agent = DQN(action_space, state_space)
     for e in range(1):
