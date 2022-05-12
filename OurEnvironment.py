@@ -215,6 +215,15 @@ class Environment:
 
 		#transmit_powers = [BS.power_transmitted for BS in self.BS_MBS]
 		#return transmit_powers
+		power_MBS = [BS.transmit_power for BS in self.BS['MBS']]
+		power_mmWave = [BS.transmit_power for BS in self.BS['mmWave']]
+		power_THz = [BS.transmit_power for BS in self.BS['THz']]
+		bandwidth_MBS = [BS.bandwidth for BS in self.BS['MBS']]
+		bandwidth_mmWave = [BS.bandwidth for BS in self.BS['mmWave']]
+		bandwidth_THz = [BS.bandwidth for BS in self.BS['THz']]
+
+		state = [power_MBS, power_mmWave, power_THz, bandwidth_MBS, bandwidth_mmWave, bandwidth_THz]
+		return state
 
 	def step(self, prev_state):
 		#! One step: - Calculate received powers, associate, get DR, get DR Coverage, get PE
