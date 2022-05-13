@@ -1,5 +1,3 @@
-from math import dist
-import re
 import numpy as np
 from numpy import math as m
 from pyparsing import Dict
@@ -10,15 +8,15 @@ np.random.seed(123)
 c = 3E8
 
 class MBSChannel:
-	def __init__(self, alpha):
+	def __init__(self, beta):
 		self.name = 'MBS'
 		self.frequency = 2.4
 		self.bandwidth = 20E6
-		self.alpha = alpha
+		#self.alpha = alpha
 		self.shadow_mean = 0
 		self.shadow_std = 4
 		self.fading_mu = 3
-		self.beta = 3
+		self.beta = beta
 
 	def get_path_loss(self, position_BS, position_UE):
 		# Positions should be a tuple (x,y) with each x,y being numpy arrays of Kx1 or Nx1 where K is the 
@@ -45,7 +43,7 @@ class MBSChannel:
 		# bias: Nx1
 		# fading: NxK
 		# path_loss: NxK
-		return (np.array(power_transmitted)[:,None] + gain[:,None] - path_loss + bias[:,None] + fading)
+		return (np.array(power_transmitted)[:,None] + np.array(gain[:,None]) - path_loss + np.array(bias[:,None]) + fading)
 
 
 class mmWaveChannel:
@@ -69,18 +67,18 @@ class mmWaveChannel:
 		UE_x, UE_y = position_UE
 		num_BS = BS_x.shape[0]
 		num_UE = UE_x.shape[0]
-		shadowing_LOS = s.lognorm.rvs(s=self.shadow_std_LOS, size=(num_BS,num_UE))
-		shadowing_NLOS = s.lognorm.rvs(s=self.shadow_std_NLOS, size=(num_BS,num_UE))
+		shadowing_LOS = s.lognorm.rvs(s=self.shadow_L_std, size=(num_BS,num_UE))
+		shadowing_NLOS = s.lognorm.rvs(s=self.shadow_N_std, size=(num_BS,num_UE))
 		distance = np.power(np.power(BS_x[:, None]-UE_x,2) + np.power(BS_y[:, None]-UE_y,2), 1/2)
-		path_loss_LOS = self.fixed_path_loss + 10*self.alphaLOS*m.log10(distance) + shadowing_LOS
-		path_loss_NLOS = self.fixed_path_loss + 10*self.alphaNLOS*m.log10(distance) + shadowing_NLOS
+		path_loss_LOS = self.fixed_path_loss + 10*self.alphaLOS*np.log10(distance) + shadowing_LOS
+		path_loss_NLOS = self.fixed_path_loss + 10*self.alphaNLOS*np.log10(distance) + shadowing_NLOS
 
 		# net path loss is the weighted sum of LOS and NLOS path losses.
 		path_loss = self.prob_LOS*path_loss_LOS + self.prob_NLOS*path_loss_NLOS
 		return path_loss
 
 	def get_received_power(self, power_transmitted, gain, fading, path_loss, bias):
-		return (power_transmitted[:,None] + gain[:,None] - path_loss + bias[:,None] + fading)
+		return (np.array(power_transmitted)[:,None] + np.array(gain)[:,None] - path_loss + np.array(bias)[:,None] + fading)
 
 
 class THzChannel:
@@ -92,10 +90,10 @@ class THzChannel:
 		self.kF = 0.0033 # some coefficient that rn i'm too tired to read about. the units are m-1
 
 	def path_loss_absorption(self, distance):
-		return self.kF*distance*10*m.log10(m.exp(1))
+		return self.kF*distance*10*np.log10(m.exp(1))
 
 	def path_loss_spread(self, distance):
-		return 20*m.log10((4*m.pi*self.frequency*distance)/c)
+		return 20*np.log10((4*m.pi*self.frequency*distance)/c)
 
 	def get_path_loss(self, position_BS, position_UE):
 		# Positions should be a tuple (x,y) with each x,y being numpy arrays of Kx1 where K is the 
@@ -109,7 +107,7 @@ class THzChannel:
 		return path_loss
 
 	def get_received_power(self, power_transmitted, gain, fading, path_loss, bias):
-		return (power_transmitted[:,None] + gain[:,None] - path_loss + bias[:,None] + fading)
+		return (np.array(power_transmitted)[:,None] + np.array(gain)[:,None] - path_loss + np.array(bias)[:,None] + fading)
 
 
 class BaseStation:
@@ -170,13 +168,13 @@ class Environment:
 		self.channels['mmWave'] = mmWaveChannel(prob_LOS, prob_NLOS)
 	
 	def add_UE(self):
-		n_UE = s.poisson(self.lambdas['UE']).rvs(size=(1,1))
+		n_UE = s.poisson(self.lambdas['UE']*self.area).rvs(size=(1,1))
 		n_UE = n_UE[0,0]
 		if n_UE == 0:
 			n_UE = 1
 		for i in range(n_UE):
-			x = s.norm.rvs((1,1))[0]
-			y = s.norm.rvs((1,1))[0]
+			x = s.norm.rvs((1,1))[0]*self.area
+			y = s.norm.rvs((1,1))[0]*self.area
 			# Initializing a UE with a received power of -100dBm and a bandwidth of 1Hz
 			self.UE.append(UserEquipment(-100, 1, x, y))
 	
@@ -187,22 +185,25 @@ class Environment:
 		gain = {'MBS': 0, 'mmWave': 20, 'THz': 24}
 		bias = {'MBS': 0, 'mmWave': 5, 'THz': 7}
 
-		for tier in self.lambdas:
-			n_BS[tier] = (s.poisson(self.lambdas[tier]).rvs(size=(1,1)))[0,0]
+		for tier in ['MBS','mmWave','THz']:
+			n_BS[tier] = (s.poisson(self.lambdas[tier]*self.area).rvs(size=(1,1)))[0,0]
 			if n_BS[tier] == 0:
 				n_BS[tier] = 1
 
 		for tier in n_BS:
 			bandwidth_per_BS = self.channels[tier].bandwidth / n_BS[tier]
 			for i in range(n_BS[tier]):
-				x = s.norm.rvs((1,1))[0]
-				y = s.norm.rvs((1,1))[0]
+				x = s.norm.rvs((1,1))[0]*self.area
+				y = s.norm.rvs((1,1))[0]*self.area
 				self.BS[tier].append(BaseStation(transmit_power[tier], gain[tier], bias[tier], bandwidth_per_BS, self.channels[tier],x,y))
 
 
 	def reset(self):
 		pass
-		#self.UE = []
+		self.UE = []
+		self.BS = {'MBS': [],
+				   'mmWave': [],
+				   'THz': []}
 		#self.UE_MBS = []
 		#self.UE_mmWave = []
 		#self.UE_THz = []
@@ -210,17 +211,17 @@ class Environment:
 		#self.BS_mmWave = []
 		#self.BS_THz = []
 
-		#self.add_UE()
-		#self.add_BS()		
+		self.add_UE()
+		self.add_BS()		
 
 		#transmit_powers = [BS.power_transmitted for BS in self.BS_MBS]
 		#return transmit_powers
-		power_MBS = [BS.transmit_power for BS in self.BS['MBS']]
-		power_mmWave = [BS.transmit_power for BS in self.BS['mmWave']]
-		power_THz = [BS.transmit_power for BS in self.BS['THz']]
-		bandwidth_MBS = [BS.bandwidth for BS in self.BS['MBS']]
-		bandwidth_mmWave = [BS.bandwidth for BS in self.BS['mmWave']]
-		bandwidth_THz = [BS.bandwidth for BS in self.BS['THz']]
+		power_MBS = np.array([BS.power_transmitted for BS in self.BS['MBS']])
+		power_mmWave = np.array([BS.power_transmitted for BS in self.BS['mmWave']])
+		power_THz = np.array([BS.power_transmitted for BS in self.BS['THz']])
+		bandwidth_MBS = np.array([BS.bandwidth for BS in self.BS['MBS']])
+		bandwidth_mmWave = np.array([BS.bandwidth for BS in self.BS['mmWave']])
+		bandwidth_THz = np.array([BS.bandwidth for BS in self.BS['THz']])
 
 		state = [power_MBS, power_mmWave, power_THz, bandwidth_MBS, bandwidth_mmWave, bandwidth_THz]
 		return state
@@ -249,14 +250,14 @@ class Environment:
 
 		position_UE = (np.array([UE.x_coord for UE in self.UE]), np.array([UE.y_coord for UE in self.UE]))
 		for tier in ['MBS', 'mmWave', 'THz']:
-			rewards[tier] = np.zeros((self.n_BS[tier],1))
+			rewards[tier] = np.zeros((self.n_BS[tier](),1))
 			position_BS[tier] = (np.array([BS.x_coord for BS in self.BS[tier]]), np.array([BS.y_coord for BS in self.BS[tier]]))
 			gains[tier] = np.array([BS.gain for BS in self.BS[tier]])
 			bias[tier] = np.array([BS.bias for BS in self.BS[tier]])
 			transmit_powers[tier] = [BS.power_transmitted for BS in self.BS[tier]]
 			current_avg_transmit_power[tier] = np.nanmean(transmit_powers[tier])
 			prev_avg_transmit_power[tier] = np.nanmean(prev_transmit_power[tier])
-			fading[tier] = s.nakagami(self.channels[tier].fading_mu).rvs((self.n_BS[tier], self.n_UE))
+			fading[tier] = s.nakagami(self.channels[tier].fading_mu).rvs((self.n_BS[tier](), self.n_UE()))
 			path_loss[tier] = self.channels[tier].get_path_loss(position_BS[tier], position_UE)
 
 			#* received_powers[tier]: n_BS[tier] x n_UE matrix
@@ -268,17 +269,21 @@ class Environment:
 									bias[tier]
 			)
 			#* received_powers_max[tier] = 1 x n_UE vector
-			best_BS[tier] = np.argmax(received_powers[tier], axis=0)
+			best_BS[tier] = np.squeeze(np.argmax(received_powers[tier], axis=0))
 			
 		# Associate UE with BS
-		best_BS_ue = {}
-		for idx in range(self.n_UE):
+		best_BS_ue = {'MBS':[],'mmWave':[],'THz':[]}
+		for idx in range(self.n_UE()):
 			# all this spaghetti to figure out the best BS
-			best_BS_ue['MBS'] = best_BS['MBS'][idx]
-			best_BS_ue['mmWave'] = best_BS['mmWave'][idx]
-			best_BS_ue['THz'] = best_BS['THz'][idx]
+			for tier in ['MBS', 'mmWave', 'THz']:
+				a = received_powers[tier]
+				a = a[best_BS[tier][idx]]
+				a = a[idx]
+				best_BS_ue[tier].append(a)
+			#best_BS_ue['mmWave'] = received_powers['mmWave'][best_BS['mmWave'][idx]]
+			#best_BS_ue['THz'] = received_powers['THz'][best_BS['THz'][idx]]
 			best_BS_tier = max(zip(best_BS_ue.values(), best_BS_ue.keys()))[1]
-			BS_number = best_BS[tier][idx]
+			BS_number = best_BS[best_BS_tier][idx]
 			self.UE[idx].base_station = self.BS[best_BS_tier][BS_number]
 			self.BS[best_BS_tier][BS_number].associated_UE += 1
 
@@ -286,7 +291,7 @@ class Environment:
 			self.UE[idx].received_power = (received_powers[best_BS_tier])[BS_number][idx]
 
 		# need a new loop for bandwidth
-		for idx in range(self.n_UE):
+		for idx in range(self.n_UE()):
 			self.UE[idx].bandwidth = self.UE[idx].base_station.bandwidth / self.UE[idx].base_station.associated_UE
 
 		#! REWARD POLICY: Average Received Power Inc, Each user should get more bandwidth, 
@@ -302,28 +307,28 @@ class Environment:
 		prev_avg_transmit_power = sum(prev_avg_transmit_power.values())
 
 		# Power Efficiency 
-
+		rewards_ = 0
 		if prev_avg_received_power < current_avg_received_power:
-			rewards += 1
+			rewards_ += 1
 		else:
-			rewards -= 1
+			rewards_ -= 1
 		
 		if prev_avg_transmit_power < current_avg_transmit_power:
-			rewards -= 1
+			rewards_ -= 1
 		else:
-			rewards += 1
+			rewards_ += 1
 
-		# Gives a list of lists for BS of each tier
-		BS_bandwidths = [self.BS[tier] for tier in ['MBS','mmWave','THz']]
-		# List of list of bandwidths 
-		for idx in range(len(BS_bandwidths)): 
-			bandwidths = [BS.bandwidth for BS in BS_bandwidths(idx)]
-			BS_bandwidths[idx] = bandwidths
 
-		state = [[transmit_powers[tier] for tier in ['MBS','mmWave','THz']],
-				  BS_bandwidths]
+		power_MBS = np.array([BS.power_transmitted for BS in self.BS['MBS']])
+		power_mmWave = np.array([BS.power_transmitted for BS in self.BS['mmWave']])
+		power_THz = np.array([BS.power_transmitted for BS in self.BS['THz']])
+		bandwidth_MBS = np.array([BS.bandwidth for BS in self.BS['MBS']])
+		bandwidth_mmWave = np.array([BS.bandwidth for BS in self.BS['mmWave']])
+		bandwidth_THz = np.array([BS.bandwidth for BS in self.BS['THz']])
 
-		return rewards, state
+		state = [power_MBS, power_mmWave, power_THz, bandwidth_MBS, bandwidth_mmWave, bandwidth_THz]
+
+		return rewards_, state, current_avg_received_power, current_avg_transmit_power
 
 
 

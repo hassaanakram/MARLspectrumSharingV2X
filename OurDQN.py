@@ -11,7 +11,7 @@ from tensorflow.keras.optimizers import Adam
 from tqdm import tqdm
 
 env_params = {'alpha':0.5, 'prob_LOS':0.7,
-              'prob_NLOS':0.3, 'area':500*500,
+              'prob_NLOS':0.3, 'area':700*700,
               'lambdas':{'MBS':4E-6,'mmWave':8E-6,
                          'THz':24E-6,'UE':0.0012}}
 env = Environment(**env_params)
@@ -34,16 +34,16 @@ class DQN:
         self.epsilon_decay = .995
         self.learning_rate = 0.001
         self.memory = deque(maxlen=100000)
-        self.model = self.build_model()
+        self.model = self.build_model(env.n_BS)
 
     def build_model(self, n_BS: dict):
         
-        input_MBS_power = Input(shape=(n_BS['MBS'],))
-        input_MBS_bandwidth = Input(shape=(n_BS['MBS'],))
-        input_mmWave_power = Input(shape=(n_BS['mmWave'],))
-        input_mmWave_bandwidth = Input(shape=(n_BS['mmWave'],))
-        input_THz_power = Input(shape=(n_BS['THz'],))
-        input_THz_bandwidth = Input(shape=(n_BS['THz'],))
+        input_MBS_power = Input(shape=(n_BS['MBS'](),))
+        input_MBS_bandwidth = Input(shape=(n_BS['MBS'](),))
+        input_mmWave_power = Input(shape=(n_BS['mmWave'](),))
+        input_mmWave_bandwidth = Input(shape=(n_BS['mmWave'](),))
+        input_THz_power = Input(shape=(n_BS['THz'](),))
+        input_THz_bandwidth = Input(shape=(n_BS['THz'](),))
         
         #* Dealing with powers and bandwidths separately 
         x_MBS_power = Dense(64, activation='relu')(input_MBS_power)
@@ -60,13 +60,13 @@ class DQN:
         x_powers = Dense(32, activation='relu')(x_powers)
         x_bandwidths = Dense(32, activation='leaky_relu')(x_bandwidths)
 
-        output_MBS_power = Dense(n_BS['MBS'], activation='linear')(x_powers)
-        output_mmWave_power = Dense(n_BS['mmWave'], activation='linear')(x_powers)
-        output_THz_power = Dense(n_BS['THz'])(x_powers, activation='linear')
+        output_MBS_power = Dense(n_BS['MBS'](), activation='linear')(x_powers)
+        output_mmWave_power = Dense(n_BS['mmWave'](), activation='linear')(x_powers)
+        output_THz_power = Dense(n_BS['THz'](), activation='linear')(x_powers)
 
-        output_MBS_bandwidth = Dense(n_BS['MBS'], activation='linear')(x_bandwidths)
-        output_mmWave_bandwidth = Dense(n_BS['mmWave'], activation='linear')(x_bandwidths)
-        output_THz_bandwidth = Dense(n_BS['THz'], activation='linear')(x_bandwidths)
+        output_MBS_bandwidth = Dense(n_BS['MBS'](), activation='linear')(x_bandwidths)
+        output_mmWave_bandwidth = Dense(n_BS['mmWave'](), activation='linear')(x_bandwidths)
+        output_THz_bandwidth = Dense(n_BS['THz'](), activation='linear')(x_bandwidths)
 
         model = Model(inputs=[input_MBS_power,input_mmWave_power,input_THz_power,
                               input_MBS_bandwidth, input_mmWave_bandwidth, input_THz_bandwidth],
@@ -83,19 +83,22 @@ class DQN:
     def act(self, state):
 
         if np.random.rand() <= self.epsilon:
-            out_MBS_power = s.randint(20,40,size=(env.n_BS['MBS']))
-            out_mmWave_power = s.randint(22,40,size=(env.n_BS['mmWave']))
-            out_THz_power = s.randint(23,39,size=(env.n_BS['THz']))
+            out_MBS_power = s.randint.rvs(20,40,size=(env.n_BS['MBS']()))
+            out_mmWave_power = s.randint.rvs(22,40,size=(env.n_BS['mmWave']()))
+            out_THz_power = s.randint.rvs(23,39,size=(env.n_BS['THz']()))
             
-            out_MBS_bandwidth = s.randint(1E6,10E6,size=(env.n_BS['MBS']))
-            out_mmWave_bandwidth = s.randint(1E9,2E9,size=(env.n_BS['mmWave']))
-            out_THz_bandwidth = s.randint(3E9,8E9,size=(env.n_BS['THz']))
+            out_MBS_bandwidth = s.randint.rvs(1E6,10E6,size=(env.n_BS['MBS']()))
+            out_mmWave_bandwidth = s.randint.rvs(1E9,2E9,size=(env.n_BS['mmWave']()))
+            out_THz_bandwidth = s.randint.rvs(3E9,8E9,size=(env.n_BS['THz']()))
 
             random_outs = [out_MBS_power, out_mmWave_power, out_THz_power,
                            out_MBS_bandwidth, out_mmWave_bandwidth, out_THz_bandwidth]
 
             return random_outs
+        # reshaping input to include a 1 batch dim as well
+        state = [i[None,:] for i in state]
         act_values = self.model.predict(state)
+        act_values = [i[0] for i in act_values]
         return act_values
 
     def replay(self):
@@ -104,21 +107,35 @@ class DQN:
             return
 
         minibatch = random.sample(self.memory, self.batch_size)
-        states = np.squeeze(np.array([i[0] for i in minibatch]))
-        actions = np.squeeze(np.array([i[1] for i in minibatch]))
-        rewards = np.squeeze(np.array([i[2] for i in minibatch]))
-        next_states = np.squeeze(np.array([i[3] for i in minibatch]))
+        states = [i[0] for i in minibatch]
+        actions = [i[1] for i in minibatch]
+        rewards = [i[2] for i in minibatch]
+        next_states = [i[3] for i in minibatch]
+
+        ip1 = np.array([i[0] for i in next_states])
+        ip2 = np.array([i[1] for i in next_states])
+        ip3 = np.array([i[2] for i in next_states])
+        ip4 = np.array([i[3] for i in next_states])
+        ip5 = np.array([i[4] for i in next_states])
+        ip6 = np.array([i[5] for i in next_states])
+        model_input = [ip1,ip2,ip3,ip4,ip5,ip6]
         #dones = np.array([i[4] for i in minibatch])
-
-        states = np.squeeze(states)
-        next_states = np.squeeze(next_states)
-
-        targets = rewards + self.gamma*(self.model.predict_on_batch(next_states))
+        model_output = self.model.predict_on_batch(model_input)
+        discounted_actions = [i*self.gamma for i in model_output]
+        discounted_sum_of_rewards = [np.array(rewards)[:,None] + i for i in discounted_actions]
+        targets = discounted_sum_of_rewards
         #targets_full = self.model.predict_on_batch(states)
 
         #ind = np.array([i for i in range(self.batch_size)])
         #targets_full[[ind], [actions]] = targets
-
+        ip1 = np.array([i[0] for i in states])
+        ip2 = np.array([i[1] for i in states])
+        ip3 = np.array([i[2] for i in states])
+        ip4 = np.array([i[3] for i in states])
+        ip5 = np.array([i[4] for i in states])
+        ip6 = np.array([i[5] for i in states])
+        states = [ip1,ip2,ip3,ip4,ip5,ip6]
+        
         self.model.fit(states, targets, epochs=1, verbose=0)
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
@@ -127,29 +144,47 @@ class DQN:
 def train_dqn(episode):
 
     loss = []
+    avg_receieved_powers = []
+    avg_transmit_powers = []
+
     
     #action_space = 3
     #state_space = 5
-    max_steps = 1000
+    max_steps = 50
     state = env.reset()
-    action_space = sum(env.n_BS.values())
+    action_space = 5
     state_space = action_space
     agent = DQN(action_space, state_space)
-    for e in range(1):
-        state = np.reshape(state, (1, state_space))
+    betas = s.uniform(loc=2.9, scale=1.2).rvs(size=(episode))
+    prob_LOS = s.uniform().rvs(size=(episode))
+    prob_NLOS = 1 - prob_LOS
+
+    for e in range(episode):
+        env.renew_channel(betas[e],prob_LOS[e],prob_NLOS[e])
+        #state = np.reshape(state, (1, state_space))
         score = 0
         for i in tqdm(range(max_steps)):
             prev_received_powers = [UE.received_power for UE in env.UE]
             action = agent.act(state)
-            prev_transmit_powers = [BS.power_transmitted for BS in env.BS_MBS]
-            #! action is the new transmit powers so changing it in 
-            #! our env
+            # Destructuring the actions (outputs)
+            power_MBS, power_mmWave, power_THz, band_MBS, band_mmWave, band_THz = action
 
-            for idx in range(len(env.BS_MBS)):
-                env.BS_MBS[idx].power_transmitted = action[idx]
-            reward, next_state = env.step(prev_received_powers, prev_transmit_powers)
+            powers = {'MBS': power_MBS, 'mmWave': power_mmWave, 'THz': power_THz}
+            bandwidths = {'MBS': band_MBS, 'mmWave': band_mmWave, 'THz': band_THz}
+
+            prev_transmit_powers = {}
+            for tier in ['MBS', 'mmWave', 'THz']:
+                prev_transmit_powers[tier] = [BS.power_transmitted for BS in env.BS[tier]]
+            prev_state = [prev_transmit_powers, prev_received_powers, 1,1]
+            # Assigning new transmission powers and bandwidths 
+            for tier in ['MBS', 'mmWave', 'THz']:
+                for idx in range(len(env.BS[tier])):
+                    env.BS[tier][idx].power_transmitted = powers[tier][idx]
+                    env.BS[tier][idx].bandwidth = bandwidths[tier][idx]
+
+            reward, next_state, avg_received_power, avg_transmit_power = env.step(prev_state)
             score += reward
-            next_state = np.reshape(next_state, (1, state_space))
+            #next_state = np.reshape(next_state, (1, state_space))
             agent.remember(state, action, reward, next_state)
             state = next_state
             agent.replay()
@@ -157,15 +192,21 @@ def train_dqn(episode):
             #    print("episode: {}/{}, score: {}".format(e, episode, score))
             #    break
         loss.append(score)
-    return loss
+        avg_receieved_powers.append(avg_received_power)
+        avg_transmit_powers.append(avg_transmit_power)
+    return loss, avg_receieved_powers, avg_transmit_powers
 
 
 if __name__ == '__main__':
 
-    ep = 100
-    loss = train_dqn(ep)
+    ep = 50
+    loss, avg_received_powers, avg_transmit_powers = train_dqn(ep)
     #plt.plot([i for i in range(ep)], loss)
-    plt.plot([i for i in range(6)], np.squeeze(loss))
+    plt.figure()
+    plt.plot([i for i in range(ep)], np.squeeze(loss))
     plt.xlabel('episodes')
     plt.ylabel('reward')
+    plt.figure()
+    plt.plot([i for i in range(ep)], avg_received_powers, label='avg received powers')
+    plt.plot([i for i in range(ep)], avg_transmit_powers, label='avg_transmit_powers')
     plt.show()
