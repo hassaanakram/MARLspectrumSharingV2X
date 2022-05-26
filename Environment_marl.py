@@ -449,8 +449,8 @@ class Environ:
 
         lambdda = 0.
         reward = lambdda * np.sum(V2I_Rate) / (self.n_Veh * 10) + (1 - lambdda) * np.sum(reward_elements) / (self.n_Veh * self.n_neighbor)
-
-        return reward
+ 
+        return  reward
 
     def act_for_testing(self, actions):
 

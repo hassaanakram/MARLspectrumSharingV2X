@@ -3,6 +3,7 @@ from numpy import math as m
 from pyparsing import Dict
 import scipy.stats as s
 import random
+np.seterr(all='raise')
 
 np.random.seed(123)
 c = 3E8
@@ -17,6 +18,7 @@ class MBSChannel:
 		self.shadow_std = 4
 		self.fading_mu = 3
 		self.beta = beta
+		self.UE = []
 
 	def get_path_loss(self, position_BS, position_UE):
 		# Positions should be a tuple (x,y) with each x,y being numpy arrays of Kx1 or Nx1 where K is the 
@@ -61,6 +63,7 @@ class mmWaveChannel:
 		self.prob_LOS = prob_LOS
 		self.prob_NLOS = prob_NLOS
 		self.fixed_path_loss = 32.4 + 20*m.log10(self.frequency)
+		self.UE = []
 
 	def get_path_loss(self, position_BS, position_UE):
 		BS_x, BS_y = position_BS
@@ -88,6 +91,7 @@ class THzChannel:
 		self.bandwidth = 10E9
 		self.fading_mu = 5.2
 		self.kF = 0.0033 # some coefficient that rn i'm too tired to read about. the units are m-1
+		self.UE = []
 
 	def path_loss_absorption(self, distance):
 		return self.kF*distance*10*np.log10(m.exp(1))
@@ -126,12 +130,14 @@ class UserEquipment:
 		self.base_station = None
 		self.received_power = received_power
 		self.bandwidth = bandwidth
+		self.sinr = None
 		self.data_rate = 0
 		self.x_coord = x
 		self.y_coord = y
 
 class Environment:
 	def __init__(self, alpha, prob_LOS, prob_NLOS, area, lambdas: Dict):
+		self.tier_list = ['MBS', 'mmWave', 'THz']
 		self.channels = {'MBS': MBSChannel(alpha),
 						 'mmWave': mmWaveChannel(prob_LOS, prob_NLOS),
 						 'THz': THzChannel()}
@@ -216,14 +222,22 @@ class Environment:
 
 		#transmit_powers = [BS.power_transmitted for BS in self.BS_MBS]
 		#return transmit_powers
+		current_avg_received_power = np.nanmean(np.array([UE.received_power for UE in self.UE]))
 		power_MBS = np.array([BS.power_transmitted for BS in self.BS['MBS']])
 		power_mmWave = np.array([BS.power_transmitted for BS in self.BS['mmWave']])
 		power_THz = np.array([BS.power_transmitted for BS in self.BS['THz']])
-		bandwidth_MBS = np.array([BS.bandwidth for BS in self.BS['MBS']])
-		bandwidth_mmWave = np.array([BS.bandwidth for BS in self.BS['mmWave']])
-		bandwidth_THz = np.array([BS.bandwidth for BS in self.BS['THz']])
+		#bandwidth_MBS = np.array([BS.bandwidth for BS in self.BS['MBS']])
+		#bandwidth_mmWave = np.array([BS.bandwidth for BS in self.BS['mmWave']])
+		#bandwidth_THz = np.array([BS.bandwidth for BS in self.BS['THz']])
 
-		state = [power_MBS, power_mmWave, power_THz, bandwidth_MBS, bandwidth_mmWave, bandwidth_THz]
+		state = [current_avg_received_power,
+				np.nanmean(power_MBS), 
+				np.nanmean(power_mmWave), 
+				np.nanmean(power_THz)
+				#np.nanmean(bandwidth_MBS), 
+				#np.nanmean(bandwidth_mmWave), 
+				#np.nanmean(bandwidth_THz)]
+		]
 		return state
 
 	def step(self, prev_state):
@@ -233,7 +247,7 @@ class Environment:
 		#! Rewards: Dict with a list for each tier
 		# Unpacking prev state
 		#* prev_transmit_power is a dict
-		prev_transmit_power, prev_received_powers, prev_dr_coverage, prev_pe = prev_state
+		prev_avg_received_power, prev_avg_transmit_power = prev_state
 
 		rewards = {}
 		position_BS = {}
@@ -241,7 +255,7 @@ class Environment:
 		bias = {}
 		transmit_powers = {}
 		current_avg_transmit_power = {}
-		prev_avg_transmit_power = {}
+		#prev_avg_transmit_power = {}
 		fading = {}
 		path_loss = {}
 		received_powers = {}
@@ -256,7 +270,7 @@ class Environment:
 			bias[tier] = np.array([BS.bias for BS in self.BS[tier]])
 			transmit_powers[tier] = [BS.power_transmitted for BS in self.BS[tier]]
 			current_avg_transmit_power[tier] = np.nanmean(transmit_powers[tier])
-			prev_avg_transmit_power[tier] = np.nanmean(prev_transmit_power[tier])
+			#prev_avg_transmit_power[tier] = np.nanmean(prev_transmit_power[tier])
 			fading[tier] = s.nakagami(self.channels[tier].fading_mu).rvs((self.n_BS[tier](), self.n_UE()))
 			path_loss[tier] = self.channels[tier].get_path_loss(position_BS[tier], position_UE)
 
@@ -283,6 +297,7 @@ class Environment:
 			#best_BS_ue['mmWave'] = received_powers['mmWave'][best_BS['mmWave'][idx]]
 			#best_BS_ue['THz'] = received_powers['THz'][best_BS['THz'][idx]]
 			best_BS_tier = max(zip(best_BS_ue.values(), best_BS_ue.keys()))[1]
+			self.channels[best_BS_tier].UE.append(self.UE[idx])
 			BS_number = best_BS[best_BS_tier][idx]
 			self.UE[idx].base_station = self.BS[best_BS_tier][BS_number]
 			self.BS[best_BS_tier][BS_number].associated_UE += 1
@@ -290,23 +305,26 @@ class Environment:
 			# now the powers
 			self.UE[idx].received_power = (received_powers[best_BS_tier])[BS_number][idx]
 
-		# need a new loop for bandwidth
+		# need a new loop for bandwidth and sinr
 		for idx in range(self.n_UE()):
+			self.UE[idx].sinr = (self.UE[idx].received_power)/()
 			self.UE[idx].bandwidth = self.UE[idx].base_station.bandwidth / self.UE[idx].base_station.associated_UE
 
+		
 		#! REWARD POLICY: Average Received Power Inc, Each user should get more bandwidth, 
 		#! PE should increase
 		#! GOING WITH A GLOBAL REWARD TO PROMOTE OVERALL BETTER SYSTEM
 		# Received power
 		current_received_powers = np.array([UE.received_power for UE in self.UE])
 		current_avg_received_power = np.nanmean(current_received_powers)
-		prev_avg_received_power = np.nanmean(prev_received_powers)
+		#prev_avg_received_power = np.nanmean(prev_received_powers)
 		
 		# transmit power
-		current_avg_transmit_power = sum(current_avg_transmit_power.values())
-		prev_avg_transmit_power = sum(prev_avg_transmit_power.values())
+		current_avg_transmit_power = np.mean(list(current_avg_transmit_power.values()))
+		#prev_avg_transmit_power = sum(prev_avg_transmit_power.values())
 
 		# Power Efficiency 
+		#rewards_ = max([,current_avg_received_power-prev_avg_received_power])+max([prev_avg_transmit_power-current_avg_transmit_power,])
 		rewards_ = 0
 		if prev_avg_received_power < current_avg_received_power:
 			rewards_ += 1
@@ -322,11 +340,17 @@ class Environment:
 		power_MBS = np.array([BS.power_transmitted for BS in self.BS['MBS']])
 		power_mmWave = np.array([BS.power_transmitted for BS in self.BS['mmWave']])
 		power_THz = np.array([BS.power_transmitted for BS in self.BS['THz']])
-		bandwidth_MBS = np.array([BS.bandwidth for BS in self.BS['MBS']])
-		bandwidth_mmWave = np.array([BS.bandwidth for BS in self.BS['mmWave']])
-		bandwidth_THz = np.array([BS.bandwidth for BS in self.BS['THz']])
+		#bandwidth_MBS = np.array([BS.bandwidth for BS in self.BS['MBS']])
+		#bandwidth_mmWave = np.array([BS.bandwidth for BS in self.BS['mmWave']])
+		#bandwidth_THz = np.array([BS.bandwidth for BS in self.BS['THz']])
 
-		state = [power_MBS, power_mmWave, power_THz, bandwidth_MBS, bandwidth_mmWave, bandwidth_THz]
+		state = [current_avg_received_power,
+				np.nanmean(power_MBS), 
+				np.nanmean(power_mmWave), 
+				np.nanmean(power_THz)]
+				#np.nanmean(bandwidth_MBS), 
+				#np.nanmean(bandwidth_mmWave), 
+				#np.nanmean(bandwidth_THz)]
 
 		return rewards_, state, current_avg_received_power, current_avg_transmit_power
 
